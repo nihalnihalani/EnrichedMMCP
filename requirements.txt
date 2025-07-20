@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pandas
+requests
+aiosqlite
+graphql-core
+strawberry-graphql 
