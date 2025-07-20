@@ -1,43 +1,54 @@
 # ==============================================================================
 # FILE: app.py
 #
-# PURPOSE: The main FastAPI application that creates an API server that exposes
-#          the data from the SQLite database with LLM integration support.
+# PURPOSE: Simplified unified application combining stock market API with 
+#          basic research tools and a clean Gradio interface.
 #
-# USAGE: Run `python -m uvicorn app:app --reload --port 8001` in your terminal.
+# USAGE: Run `python app.py` to start both API and web interface
 # ==============================================================================
+
+import gradio as gr
+import requests
+import json
+import os
+import asyncio
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from dotenv import load_dotenv
 import sqlalchemy as sa
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from typing import List, Optional
-import json
-from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import threading
 
-# --- Database and SQLAlchemy Setup ---
+# Import research tools
+try:
+    from MCP.consilium_mcp.research_tools import EnhancedResearchAgent
+    RESEARCH_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Research tools not available: {e}")
+    RESEARCH_AVAILABLE = False
 
-# Database URL for SQLite (async version)
+# Load environment variables
+load_dotenv()
+
+# ==============================================================================
+# DATABASE SETUP
+# ==============================================================================
+
 DATABASE_URL = "sqlite+aiosqlite:///stock_market.db"
-
-# Create an async engine
 engine = create_async_engine(DATABASE_URL, echo=False)
-
-# Create a session factory for creating async sessions
-async_session_factory = sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
-)
-
-# Define the base for our ORM models
+async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
-# --- ORM Model Definition ---
 def create_stock_orm_model():
     """Creates the SQLAlchemy ORM model for stock data."""
     class StockData(Base):
         __tablename__ = 'stock_data'
         
-        # Define all columns
         id = sa.Column(sa.Integer, primary_key=True)
         date = sa.Column(sa.DateTime)
         natural_gas_price = sa.Column(sa.Float)
@@ -82,48 +93,105 @@ def create_stock_orm_model():
 
 StockData = create_stock_orm_model()
 
-# --- FastAPI App Setup ---
+# ==============================================================================
+# FASTAPI APP
+# ==============================================================================
 
 app = FastAPI(
-    title="Stock Market Data API",
-    description="An API for querying historical stock market data with LLM integration support.",
+    title="Stock Market Analysis",
+    description="Simple stock market data API with research tools",
     version="1.0.0"
 )
 
-# --- REST API Endpoints ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 async def get_session() -> AsyncSession:
-    """FastAPI dependency to provide a DB session for each request."""
     async with async_session_factory() as session:
         yield session
+
+@app.get("/")
+async def root():
+    return {
+        "message": "Stock Market Analysis API",
+        "endpoints": {
+            "latest_prices": "/api/latest-prices",
+            "market_overview": "/api/market-overview",
+            "stock_data": "/api/stock-datas",
+            "historical": "/api/historical-analysis?symbol=AAPL&days=30",
+            "tools": "/tools"
+        }
+    }
+
+@app.get("/api/latest-prices")
+async def get_latest_prices(session: AsyncSession = Depends(get_session)):
+    """Get latest stock prices"""
+    result = await session.execute(
+        sa.select(StockData).order_by(StockData.date.desc()).limit(1)
+    )
+    record = result.scalar_one_or_none()
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="No data available")
+    
+    return {
+        "date": record.date.isoformat() if record.date else None,
+        "prices": {
+            "bitcoin": record.bitcoin_price,
+            "ethereum": record.ethereum_price,
+            "apple": record.apple_price,
+            "tesla": record.tesla_price,
+            "microsoft": record.microsoft_price,
+            "google": record.google_price,
+            "nvidia": record.nvidia_price,
+            "netflix": record.netflix_price,
+            "amazon": record.amazon_price,
+            "meta": record.meta_price,
+            "gold": record.gold_price,
+            "silver": record.silver_price,
+            "crude_oil": record.crude_oil_price,
+            "sp_500": record.s_p_500_price,
+            "nasdaq": record.nasdaq_100_price
+        }
+    }
+
+@app.get("/api/market-overview")
+async def get_market_overview(session: AsyncSession = Depends(get_session)):
+    """Get market overview"""
+    result = await session.execute(
+        sa.select(StockData).order_by(StockData.date.desc()).limit(1)
+    )
+    latest = result.scalar_one_or_none()
+    
+    if not latest:
+        raise HTTPException(status_code=404, detail="No data available")
+    
+    return {
+        "latest_date": latest.date.isoformat() if latest.date else None,
+        "available_instruments": [
+            "bitcoin", "ethereum", "apple", "tesla", "microsoft", 
+            "google", "nvidia", "netflix", "amazon", "meta",
+            "gold", "silver", "platinum", "copper", "crude_oil", 
+            "natural_gas", "sp_500", "nasdaq_100", "berkshire"
+        ]
+    }
 
 @app.get("/api/stock-datas")
 async def get_stock_datas(
     limit: int = 100,
     offset: int = 0,
-    date_eq: Optional[str] = None,
-    date_gte: Optional[str] = None,
-    date_lte: Optional[str] = None,
     session: AsyncSession = Depends(get_session)
 ):
-    """REST endpoint to get stock data with filtering"""
-    query = sa.select(StockData)
-    
-    # Apply filters
-    if date_eq:
-        query = query.where(StockData.date == date_eq)
-    if date_gte:
-        query = query.where(StockData.date >= date_gte)
-    if date_lte:
-        query = query.where(StockData.date <= date_lte)
-    
-    # Apply pagination
-    query = query.limit(limit).offset(offset)
-    
+    """Get stock data with pagination"""
+    query = sa.select(StockData).limit(limit).offset(offset)
     result = await session.execute(query)
     records = result.scalars().all()
     
-    # Convert to dict
     data = []
     for record in records:
         record_dict = {}
@@ -136,270 +204,274 @@ async def get_stock_datas(
     
     return {"data": data, "total": len(data)}
 
-@app.get("/api/stock-datas/{record_id}")
-async def get_stock_data_by_id(
-    record_id: int,
+@app.get("/api/historical-analysis")
+async def get_historical_analysis(
+    symbol: str,
+    days: int = 30,
     session: AsyncSession = Depends(get_session)
 ):
-    """REST endpoint to get a single stock data record by ID"""
-    result = await session.execute(
-        sa.select(StockData).where(StockData.id == record_id)
-    )
-    record = result.scalar_one_or_none()
-    
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
-    
-    # Convert to dict
-    record_dict = {}
-    for column in StockData.__table__.columns:
-        value = getattr(record, column.name)
-        if isinstance(value, datetime):
-            value = value.isoformat()
-        record_dict[column.name] = value
-    
-    return record_dict
-
-@app.get("/api/latest-prices")
-async def get_latest_prices(session: AsyncSession = Depends(get_session)):
-    """REST endpoint to get the latest stock prices"""
-    result = await session.execute(
-        sa.select(StockData).order_by(StockData.date.desc()).limit(1)
-    )
-    record = result.scalar_one_or_none()
-    
-    if not record:
-        raise HTTPException(status_code=404, detail="No data available")
-    
-    # Convert to dict
-    record_dict = {}
-    for column in StockData.__table__.columns:
-        value = getattr(record, column.name)
-        if isinstance(value, datetime):
-            value = value.isoformat()
-        record_dict[column.name] = value
-    
-    return record_dict
-
-@app.get("/api/market-overview")
-async def get_market_overview(session: AsyncSession = Depends(get_session)):
-    """Get a market overview with latest prices and basic statistics"""
-    # Get latest prices
-    result = await session.execute(
-        sa.select(StockData).order_by(StockData.date.desc()).limit(1)
-    )
-    latest = result.scalar_one_or_none()
-    
-    if not latest:
-        raise HTTPException(status_code=404, detail="No data available")
-    
-    # Get some basic statistics
-    result = await session.execute(
-        sa.select(StockData).order_by(StockData.date.desc()).limit(30)
-    )
-    recent_data = result.scalars().all()
-    
-    overview = {
-        "latest_date": latest.date.isoformat() if latest.date else None,
-        "latest_prices": {
-            "bitcoin": latest.bitcoin_price,
-            "ethereum": latest.ethereum_price,
-            "apple": latest.apple_price,
-            "tesla": latest.tesla_price,
-            "microsoft": latest.microsoft_price,
-            "google": latest.google_price,
-            "nvidia": latest.nvidia_price,
-            "netflix": latest.netflix_price,
-            "amazon": latest.amazon_price,
-            "meta": latest.meta_price,
-            "gold": latest.gold_price,
-            "silver": latest.silver_price,
-            "crude_oil": latest.crude_oil_price,
-            "sp_500": latest.s_p_500_price,
-            "nasdaq_100": latest.nasdaq_100_price
-        },
-        "data_points": len(recent_data),
-        "available_instruments": [
-            "bitcoin", "ethereum", "apple", "tesla", "microsoft", 
-            "google", "nvidia", "netflix", "amazon", "meta",
-            "gold", "silver", "platinum", "copper", "crude_oil", 
-            "natural_gas", "sp_500", "nasdaq_100", "berkshire"
-        ]
+    """Get historical analysis for a symbol"""
+    # Map symbol to column name
+    symbol_map = {
+        "AAPL": "apple_price",
+        "TSLA": "tesla_price", 
+        "MSFT": "microsoft_price",
+        "GOOGL": "google_price",
+        "NVDA": "nvidia_price",
+        "NFLX": "netflix_price",
+        "AMZN": "amazon_price",
+        "META": "meta_price",
+        "BTC": "bitcoin_price",
+        "ETH": "ethereum_price",
+        "GOLD": "gold_price",
+        "SILVER": "silver_price",
+        "OIL": "crude_oil_price",
+        "SP500": "s_p_500_price",
+        "NASDAQ": "nasdaq_100_price"
     }
     
-    return overview
-
-# --- LLM Tool Definitions ---
+    column_name = symbol_map.get(symbol.upper())
+    if not column_name:
+        raise HTTPException(status_code=400, detail=f"Symbol {symbol} not supported")
+    
+    # Get historical data
+    result = await session.execute(
+        sa.select(StockData).order_by(StockData.date.desc()).limit(days)
+    )
+    records = result.scalars().all()
+    
+    if not records:
+        raise HTTPException(status_code=404, detail="No data available")
+    
+    # Extract prices
+    prices = []
+    dates = []
+    for record in reversed(records):  # Oldest first
+        price = getattr(record, column_name)
+        if price is not None:
+            prices.append(price)
+            dates.append(record.date.isoformat() if record.date else None)
+    
+    if not prices:
+        raise HTTPException(status_code=404, detail="No price data available")
+    
+    # Calculate basic statistics
+    current_price = prices[-1]
+    price_change = current_price - prices[0] if len(prices) > 1 else 0
+    percent_change = (price_change / prices[0] * 100) if prices[0] != 0 else 0
+    
+    return {
+        "symbol": symbol.upper(),
+        "current_price": current_price,
+        "price_change": price_change,
+        "percent_change": round(percent_change, 2),
+        "data_points": len(prices),
+        "prices": prices,
+        "dates": dates
+    }
 
 @app.get("/tools")
 async def get_tools():
-    """Endpoint to get tool definitions for LLM integration"""
-    tools = {
+    """Get available tools for LLM integration"""
+    return {
         "tools": [
             {
                 "type": "function",
                 "function": {
-                    "name": "get_stock_data",
-                    "description": "Get stock market data with filtering and pagination",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of records to return (default: 100)"
-                            },
-                            "offset": {
-                                "type": "integer",
-                                "description": "Number of records to skip (default: 0)"
-                            },
-                            "date_eq": {
-                                "type": "string",
-                                "description": "Exact date filter (YYYY-MM-DD format)"
-                            },
-                            "date_gte": {
-                                "type": "string",
-                                "description": "Date greater than or equal filter (YYYY-MM-DD format)"
-                            },
-                            "date_lte": {
-                                "type": "string",
-                                "description": "Date less than or equal filter (YYYY-MM-DD format)"
-                            }
-                        }
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
                     "name": "get_latest_prices",
-                    "description": "Get the most recent stock prices for all instruments",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
+                    "description": "Get latest stock market prices",
+                    "parameters": {"type": "object", "properties": {}}
                 }
             },
             {
-                "type": "function",
-                "function": {
-                    "name": "get_stock_data_by_id",
-                    "description": "Get a specific stock data record by its ID",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "record_id": {
-                                "type": "integer",
-                                "description": "The ID of the record to retrieve"
-                            }
-                        },
-                        "required": ["record_id"]
-                    }
-                }
-            },
-            {
-                "type": "function",
+                "type": "function", 
                 "function": {
                     "name": "get_market_overview",
-                    "description": "Get a comprehensive market overview with latest prices and statistics",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
+                    "description": "Get market overview and available instruments",
+                    "parameters": {"type": "object", "properties": {}}
                 }
             },
             {
                 "type": "function",
                 "function": {
-                    "name": "get_historical_market_data",
-                    "description": "Access historical stock market data for trend analysis and market insights",
+                    "name": "get_historical_analysis",
+                    "description": "Get historical price analysis for a symbol",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "instrument": {
+                            "symbol": {
                                 "type": "string",
-                                "enum": ["bitcoin", "ethereum", "apple", "tesla", "microsoft", "google", "nvidia", "netflix", "amazon", "meta", "gold", "silver", "platinum", "copper", "crude_oil", "natural_gas", "sp_500", "nasdaq_100", "berkshire"],
-                                "description": "Specific financial instrument to analyze"
+                                "description": "Stock symbol (e.g., AAPL, TSLA, BTC)"
                             },
-                            "date_range": {
-                                "type": "string",
-                                "description": "Date range for analysis (e.g., 'last 30 days', '2024-01-01 to 2024-02-01')"
-                            },
-                            "analysis_type": {
-                                "type": "string",
-                                "enum": ["trend", "volatility", "correlation", "performance", "volume"],
-                                "description": "Type of market analysis to perform"
+                            "days": {
+                                "type": "integer",
+                                "description": "Number of days to analyze (default: 30)"
                             }
                         },
-                        "required": ["instrument"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_market_comparison",
-                    "description": "Compare multiple instruments for relative performance analysis",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "instruments": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "List of instruments to compare (max 5)"
-                            },
-                            "timeframe": {
-                                "type": "string",
-                                "description": "Time period for comparison (e.g., 'last month', '2024')"
-                            },
-                            "metric": {
-                                "type": "string",
-                                "enum": ["price_performance", "volatility", "volume", "correlation"],
-                                "description": "Comparison metric"
-                            }
-                        },
-                        "required": ["instruments"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_market_overview_data",
-                    "description": "Get comprehensive market overview with latest prices and market statistics",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "include_analysis": {
-                                "type": "boolean",
-                                "description": "Include market analysis and insights",
-                                "default": True
-                            }
-                        }
+                        "required": ["symbol"]
                     }
                 }
             }
         ]
     }
-    
-    return tools
 
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "message": "Stock Market Data API",
-        "version": "1.0.0",
-        "endpoints": {
-            "rest_api": "/api/stock-datas",
-            "latest_prices": "/api/latest-prices",
-            "market_overview": "/api/market-overview",
-            "tools": "/tools",
-            "docs": "/docs"
-        },
-        "available_functions": [
-            "get_stock_data",
-            "get_latest_prices", 
-            "get_stock_data_by_id",
-            "get_market_overview"
-        ]
-    } 
+# ==============================================================================
+# GRADIO INTERFACE
+# ==============================================================================
+
+def create_simple_interface():
+    """Create a simplified Gradio interface"""
+    
+    def get_latest_prices_ui():
+        """Get latest prices from API"""
+        try:
+            response = requests.get("http://localhost:8001/api/latest-prices")
+            if response.status_code == 200:
+                data = response.json()
+                prices = data.get("prices", {})
+                
+                result = f"**Latest Prices ({data.get('date', 'N/A')})**\n\n"
+                for symbol, price in prices.items():
+                    if price is not None:
+                        result += f"• {symbol.upper()}: ${price:,.2f}\n"
+                return result
+            else:
+                return f"Error: {response.status_code}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    def analyze_symbol_ui(symbol, days):
+        """Analyze a specific symbol"""
+        if not symbol:
+            return "Please enter a symbol"
+        
+        try:
+            response = requests.get(f"http://localhost:8001/api/historical-analysis?symbol={symbol}&days={days}")
+            if response.status_code == 200:
+                data = response.json()
+                
+                result = f"**{data['symbol']} Analysis ({days} days)**\n\n"
+                result += f"• Current Price: ${data['current_price']:,.2f}\n"
+                result += f"• Price Change: ${data['price_change']:,.2f}\n"
+                result += f"• Percent Change: {data['percent_change']}%\n"
+                result += f"• Data Points: {data['data_points']}\n"
+                
+                return result
+            else:
+                return f"Error: {response.status_code} - {response.text}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    def research_query_ui(query):
+        """Research a query using available tools"""
+        if not query:
+            return "Please enter a research query"
+        
+        if not RESEARCH_AVAILABLE:
+            return "Research tools not available"
+        
+        try:
+            agent = EnhancedResearchAgent()
+            result = agent.search(query, research_depth="quick")
+            return f"**Research Results for: {query}**\n\n{result}"
+        except Exception as e:
+            return f"Research error: {str(e)}"
+    
+    def get_market_overview_ui():
+        """Get market overview"""
+        try:
+            response = requests.get("http://localhost:8001/api/market-overview")
+            if response.status_code == 200:
+                data = response.json()
+                
+                result = f"**Market Overview ({data.get('latest_date', 'N/A')})**\n\n"
+                result += "**Available Instruments:**\n"
+                instruments = data.get("available_instruments", [])
+                for i, instrument in enumerate(instruments, 1):
+                    result += f"{i}. {instrument.upper()}\n"
+                
+                return result
+            else:
+                return f"Error: {response.status_code}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    # Create the interface
+    with gr.Blocks(title="Stock Market Analysis", theme=gr.themes.Soft()) as interface:
+        gr.Markdown("# 📈 Stock Market Analysis")
+        gr.Markdown("Simple interface for stock market data and research")
+        
+        with gr.Tabs():
+            # Prices Tab
+            with gr.TabItem("💰 Prices"):
+                gr.Markdown("### Latest Market Prices")
+                prices_btn = gr.Button("Get Latest Prices", variant="primary")
+                prices_output = gr.Textbox(label="Results", lines=10)
+                prices_btn.click(get_latest_prices_ui, outputs=prices_output)
+            
+            # Analysis Tab
+            with gr.TabItem("📊 Analysis"):
+                gr.Markdown("### Symbol Analysis")
+                with gr.Row():
+                    symbol_input = gr.Textbox(label="Symbol", placeholder="AAPL, TSLA, BTC...")
+                    days_input = gr.Slider(minimum=1, maximum=365, value=30, step=1, label="Days")
+                analyze_btn = gr.Button("Analyze", variant="primary")
+                analysis_output = gr.Textbox(label="Analysis Results", lines=10)
+                analyze_btn.click(analyze_symbol_ui, inputs=[symbol_input, days_input], outputs=analysis_output)
+            
+            # Research Tab
+            with gr.TabItem("🔍 Research"):
+                gr.Markdown("### Market Research")
+                research_input = gr.Textbox(label="Research Query", placeholder="What is the current state of AI stocks?")
+                research_btn = gr.Button("Research", variant="primary")
+                research_output = gr.Textbox(label="Research Results", lines=15)
+                research_btn.click(research_query_ui, inputs=research_input, outputs=research_output)
+            
+            # Overview Tab
+            with gr.TabItem("📋 Overview"):
+                gr.Markdown("### Market Overview")
+                overview_btn = gr.Button("Get Overview", variant="primary")
+                overview_output = gr.Textbox(label="Market Overview", lines=10)
+                overview_btn.click(get_market_overview_ui, outputs=overview_output)
+        
+        # Footer
+        gr.Markdown("---")
+        gr.Markdown("**API Endpoints:** `/api/latest-prices`, `/api/market-overview`, `/api/historical-analysis`, `/tools`")
+    
+    return interface
+
+# ==============================================================================
+# MAIN APPLICATION
+# ==============================================================================
+
+def start_api_server():
+    """Start the FastAPI server in a separate thread"""
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
+
+def main():
+    """Main function to start both API and Gradio interface"""
+    print("🚀 Starting Stock Market Analysis Platform...")
+    
+    # Start API server in background
+    api_thread = threading.Thread(target=start_api_server, daemon=True)
+    api_thread.start()
+    
+    print("📖 API Documentation: http://localhost:8001/docs")
+    print("🔧 API Root: http://localhost:8001/")
+    
+    # Wait a moment for API to start
+    import time
+    time.sleep(2)
+    
+    # Start Gradio interface
+    print("🌐 Starting Web Interface...")
+    interface = create_simple_interface()
+    interface.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False,
+        show_error=True
+    )
+
+if __name__ == "__main__":
+    main() 
