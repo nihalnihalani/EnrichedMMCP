@@ -306,6 +306,77 @@ async def get_tools():
                         "properties": {}
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_historical_market_data",
+                    "description": "Access historical stock market data for trend analysis and market insights",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "instrument": {
+                                "type": "string",
+                                "enum": ["bitcoin", "ethereum", "apple", "tesla", "microsoft", "google", "nvidia", "netflix", "amazon", "meta", "gold", "silver", "platinum", "copper", "crude_oil", "natural_gas", "sp_500", "nasdaq_100", "berkshire"],
+                                "description": "Specific financial instrument to analyze"
+                            },
+                            "date_range": {
+                                "type": "string",
+                                "description": "Date range for analysis (e.g., 'last 30 days', '2024-01-01 to 2024-02-01')"
+                            },
+                            "analysis_type": {
+                                "type": "string",
+                                "enum": ["trend", "volatility", "correlation", "performance", "volume"],
+                                "description": "Type of market analysis to perform"
+                            }
+                        },
+                        "required": ["instrument"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_market_comparison",
+                    "description": "Compare multiple instruments for relative performance analysis",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "instruments": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of instruments to compare (max 5)"
+                            },
+                            "timeframe": {
+                                "type": "string",
+                                "description": "Time period for comparison (e.g., 'last month', '2024')"
+                            },
+                            "metric": {
+                                "type": "string",
+                                "enum": ["price_performance", "volatility", "volume", "correlation"],
+                                "description": "Comparison metric"
+                            }
+                        },
+                        "required": ["instruments"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_market_overview_data",
+                    "description": "Get comprehensive market overview with latest prices and market statistics",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "include_analysis": {
+                                "type": "boolean",
+                                "description": "Include market analysis and insights",
+                                "default": True
+                            }
+                        }
+                    }
+                }
             }
         ]
     }
