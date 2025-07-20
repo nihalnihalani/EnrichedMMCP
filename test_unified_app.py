@@ -9,7 +9,7 @@ import time
 
 def test_api_endpoints():
     """Test all API endpoints"""
-    base_url = "http://localhost:8002"
+    base_url = "http://localhost:8001"
     
     print("🧪 Testing Unified Stock Market Analysis Platform")
     print("=" * 60)
@@ -106,7 +106,7 @@ def test_api_endpoints():
 
 def test_multiple_symbols():
     """Test historical analysis for multiple symbols"""
-    base_url = "http://localhost:8002"
+    base_url = "http://localhost:8001"
     
     print("\n📊 Testing Multiple Symbols")
     print("=" * 40)
@@ -131,7 +131,7 @@ def test_llm_integration_example():
     print("\n🤖 LLM Integration Example")
     print("=" * 40)
     
-    base_url = "http://localhost:8002"
+    base_url = "http://localhost:8001"
     
     # Get tool definitions
     try:
@@ -148,7 +148,7 @@ def test_llm_integration_example():
             print("import requests")
             print()
             print("# Get tool definitions")
-            print("tools_response = requests.get('http://localhost:8002/tools')")
+            print("tools_response = requests.get('http://localhost:8001/tools')")
             print("tools = tools_response.json()['tools']")
             print()
             print("# Use with OpenAI")
@@ -168,8 +168,8 @@ def test_llm_integration_example():
 def main():
     """Main test function"""
     print("🚀 Starting Unified Application Tests")
-    print("Make sure the API is running on http://localhost:8002")
-    print("Run: python -m uvicorn unified_app:app --host 0.0.0.0 --port 8002")
+    print("Make sure the API is running on http://localhost:8001")
+    print("Run: python -m uvicorn unified_app:app --host 0.0.0.0 --port 8001")
     print()
     
     # Wait a moment for user to read
@@ -185,7 +185,7 @@ def main():
     print("\n🎯 Next steps:")
     print("1. Start the web interface: python unified_app.py --mode web")
     print("2. Visit http://localhost:7860 for the Gradio UI")
-    print("3. Check API docs at http://localhost:8002/docs")
+    print("3. Check API docs at http://localhost:8001/docs")
     print("4. Use the LLM tools for AI integration")
 
 if __name__ == "__main__":
