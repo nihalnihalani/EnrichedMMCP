@@ -4,5 +4,7 @@ sqlalchemy
 pandas
 requests
 aiosqlite
-graphql-core
-strawberry-graphql 
+numpy
+gradio
+python-dotenv
+pydantic 
